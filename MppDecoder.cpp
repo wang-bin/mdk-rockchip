@@ -243,7 +243,7 @@ bool MppDecoder::open()
     RK_ENSURE(mpi_->control(ctx_, MPP_SET_OUTPUT_TIMEOUT, &sync_timeout), false);
     auto prop = get_or("buffer", "drm");
     // TODO: +flags MPP_BUFFER_FLAGS
-    MppBufferType type = MPP_BUFFER_TYPE_DRM;//MPP_BUFFER_TYPE_ION;
+    MppBufferType type = MPP_BUFFER_TYPE_DRM;
     if (prop == "drm") {
         type = MPP_BUFFER_TYPE_DRM;
     } else if (prop == "ion") {
@@ -255,9 +255,40 @@ bool MppDecoder::open()
     } else if (prop == "dma_heap") {
         type = MPP_BUFFER_TYPE_DMA_HEAP;
     }
-    // MPP_BUFFER_FLAGS_CACHABLE: DMA_BUF_IOCTL_SYNC in map/unmap
+
+    int flags = 0;
+    auto to_flag = [&flags](const auto& flag) {
+        if (flag == "cachable") {
+            flags |= MPP_BUFFER_FLAGS_CACHABLE; // DMA_BUF_IOCTL_SYNC in map/unmap
+        } else if (flag == "secure") {
+            flags |= MPP_BUFFER_FLAGS_SECURE;
+        } else if (flag == "dma") {
+            flags |= MPP_BUFFER_FLAGS_CONTIG;
+        } else if (flag == "dma32") {
+            flags |= MPP_BUFFER_FLAGS_DMA32;
+        } else if (flag == "wc") {
+            flags |= MPP_BUFFER_FLAGS_WC;
+        } else if (flag == "kmap") {
+            flags |= MPP_BUFFER_FLAGS_ALLOC_KMAP;
+        }
+        cout << fmt::to_string("mpp buf flag: %s = %#X", string(flag), flags) << endl;
+    };
+    prop = get("flags");
+    if (!prop.empty()) {
+        size_t f0 = 0;
+        size_t f = prop.find('+');
+        while (f != std::string::npos) {
+            if (f != f0) {
+                auto flag = string_view(&prop[f0], f - f0);
+                to_flag(flag);
+            }
+            f0 = f + 1; // skip '+'
+            f = prop.find('+', f0);
+        }
+        to_flag(string_view(&prop[f0]));
+    }
     // TODO: buffer mode internal, external
-    RK_ENSURE(mpp_buffer_group_get_internal(&frame_group_, type), false);
+    RK_ENSURE(mpp_buffer_group_get_internal(&frame_group_, type | flags), false);
     RK_ENSURE(mpi_->control(ctx_, MPP_DEC_SET_EXT_BUF_GROUP, frame_group_), false);
     size_t maxBufSize = 0;
     int maxBufCount = std::stoi(get_or("bufs", "16"));
