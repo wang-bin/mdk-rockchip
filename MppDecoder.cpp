@@ -222,9 +222,6 @@ private:
     int processOutput();
     int processOutput(MppFrame mf);
 
-    // options
-
-    // TODO: must be alive until the last frame is released
     MppCtx ctx_ = {};
     MppApi *mpi_ = nullptr;
     MppBufferGroup frame_group_ = {};
@@ -242,16 +239,8 @@ bool MppDecoder::open()
     clog << fmt::to_string("rockchip mpp codec: %u", codec) << endl;
     RK_ENSURE(mpp_check_support_format(MPP_CTX_DEC, codec), false);
     RK_ENSURE(mpp_init(ctx_, MPP_CTX_DEC, codec), false);
-    int sync_timeout = std::stoi(get_or("sync", "0")); // 0: async, >0: sync/block mode with timeout(ms)
-
-    if (sync_timeout) {
-        // MPP_SET_INTPUT_BLOCK_TIMEOUT
-        RK_S32 p32 = MPP_POLL_BLOCK;
-        RK_ENSURE(mpi_->control(ctx_, MPP_SET_OUTPUT_BLOCK, &p32), false);
-        RK_S64 p64 = sync_timeout;
-        RK_ENSURE(mpi_->control(ctx_, MPP_SET_OUTPUT_BLOCK_TIMEOUT, &p64), false);
-    }
-    // TODO: async timeout: MPP_SET_OUTPUT_TIMEOUT
+    RK_S64 sync_timeout = std::stoll(get_or("sync", "0")); // 0: async, >0: sync/block mode with timeout(ms). -1: infinite timeout
+    RK_ENSURE(mpi_->control(ctx_, MPP_SET_OUTPUT_TIMEOUT, &sync_timeout), false);
     auto prop = get_or("buffer", "drm");
     // TODO: +flags MPP_BUFFER_FLAGS
     MppBufferType type = MPP_BUFFER_TYPE_DRM;//MPP_BUFFER_TYPE_ION;
@@ -283,7 +272,7 @@ bool MppDecoder::open()
         RK_ENSURE(mpi_->control(ctx_, MPP_DEC_SET_OUTPUT_FORMAT, &afbc_fmt), false);
     }
 
-    // TODO: low_delay MPP_DEC_SET_IMMEDIATE_OUT? MPP_DEC_SET_VC1_EXTRA_DATA
+    // TODO: MPP_DEC_SET_IMMEDIATE_OUT? MPP_DEC_SET_VC1_EXTRA_DATA
     // MPP_DEC_SET_DISABLE_THREAD: decode in caller thread
     // MPP_DEC_GET_VPUMEM_USED_COUNT, MPP_DEC_SET_ENABLE_MVC
 
