@@ -262,7 +262,7 @@ bool MppDecoder::open()
             flags |= MPP_BUFFER_FLAGS_CACHABLE; // DMA_BUF_IOCTL_SYNC in map/unmap
         } else if (flag == "secure") {
             flags |= MPP_BUFFER_FLAGS_SECURE;
-        } else if (flag == "dma") {
+        } else if (flag == "cma") {
             flags |= MPP_BUFFER_FLAGS_CONTIG;
         } else if (flag == "dma32") {
             flags |= MPP_BUFFER_FLAGS_DMA32;
