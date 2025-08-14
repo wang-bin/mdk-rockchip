@@ -10,8 +10,8 @@ if(NOT CMAKE_PROJECT_NAME STREQUAL mdk) # not build in source tree
 endif()
 find_package(MDK)
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 26)
+#set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 check_library_exists(rockchip_mpp mpp_create "" HAVE_MPP)
 if(NOT HAVE_MPP)

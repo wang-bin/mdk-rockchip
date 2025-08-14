@@ -33,6 +33,7 @@ export  mpp_debug=23 # MPP_DBG_INFO | ...
 typedef void (*MppLogCb)(void *ctx, int level, const char *tag, const char *fmt, const char *func, va_list args);
 extern "C" int mpp_set_log_callback(void *ctx, MppLogCb cb);
 _Pragma("weak mpp_set_log_callback")
+_Pragma("weak mpp_buffer_sync_partial_end_f")
 
 using namespace std;
 
@@ -96,15 +97,15 @@ static uint32_t to_drm(MppFrameFormat mpp_fmt)
         case MPP_FMT_YUV420SP_10BIT:    return DRM_FORMAT_YUV420_10BIT; // 1 plane yuv, undefined layout, non-linear modifier is required, e.g. afbc
         case MPP_FMT_YUV422SP:          return DRM_FORMAT_YUYV;
         case MPP_FMT_YUV422SP_10BIT:    return DRM_FORMAT_Y210;
-        case MPP_FMT_YUV444SP:          return fourcc_code('V', 'U', '2', '4'); // DRM_FORMAT_VUY888. nv24 afbc
+        case MPP_FMT_YUV444SP:          return "VU24"_fourcc; // DRM_FORMAT_VUY888. nv24 afbc
         default:                        return DRM_FORMAT_INVALID;
         }
     }
     switch (mpp_fmt & MPP_FRAME_FMT_MASK) {
     case MPP_FMT_YUV420SP:          return DRM_FORMAT_NV12;
-    case MPP_FMT_YUV420SP_10BIT:    return fourcc_code('N', 'V', '1', '5'); // p010 w/o gaps
+    case MPP_FMT_YUV420SP_10BIT:    return "NV15"_fourcc; // p010 w/o gaps
     case MPP_FMT_YUV422SP:          return DRM_FORMAT_NV16;
-    case MPP_FMT_YUV422SP_10BIT:    return fourcc_code('N', 'V', '2', '0');
+    case MPP_FMT_YUV422SP_10BIT:    return "NV20"_fourcc;
     case MPP_FMT_YUV444SP:          return DRM_FORMAT_NV24;
     default:                        return DRM_FORMAT_INVALID;
     }
@@ -207,8 +208,8 @@ public:
     bool close() override {
         if (mpi_ && ctx_) {
             RK_WARN(mpi_->reset(ctx_));
-            RK_WARN(mpp_buffer_group_put(frame_group_)); // TODO: for external
-            frame_group_ = nullptr;
+            RK_WARN(mpp_buffer_group_put(buf_group_)); // TODO: for external
+            buf_group_ = nullptr;
             RK_WARN(mpp_destroy(ctx_));
             ctx_ = nullptr;
             mpi_ = nullptr;
@@ -219,12 +220,14 @@ public:
     bool flush() override;
     int decode(const Packet& pkt) override;
 private:
+    int decodeJpeg(const Packet& pkt);
     int processOutput();
     int processOutput(MppFrame mf);
 
     MppCtx ctx_ = {};
     MppApi *mpi_ = nullptr;
-    MppBufferGroup frame_group_ = {};
+    MppBufferGroup buf_group_ = {};
+    MppCodingType codec_;
 
     NativeVideoBufferPoolRef pool_;
 };
@@ -236,6 +239,7 @@ bool MppDecoder::open()
 
     const auto& par = parameters();
     const auto codec = codec_from(par.codec);
+    codec_ = codec;
     clog << fmt::to_string("rockchip mpp codec: %u", codec) << endl;
     RK_ENSURE(mpp_check_support_format(MPP_CTX_DEC, codec), false);
     RK_ENSURE(mpp_init(ctx_, MPP_CTX_DEC, codec), false);
@@ -288,24 +292,25 @@ bool MppDecoder::open()
         to_flag(string_view(&prop[f0]));
     }
     // TODO: buffer mode internal, external
-    RK_ENSURE(mpp_buffer_group_get_internal(&frame_group_, type | flags), false);
-    RK_ENSURE(mpi_->control(ctx_, MPP_DEC_SET_EXT_BUF_GROUP, frame_group_), false);
+    RK_ENSURE(mpp_buffer_group_get_internal(&buf_group_, type | flags), false);
+    RK_ENSURE(mpi_->control(ctx_, MPP_DEC_SET_EXT_BUF_GROUP, buf_group_), false);
     size_t maxBufSize = 0;
     int maxBufCount = std::stoi(get_or("bufs", "16"));
-    RK_ENSURE(mpp_buffer_group_limit_config(frame_group_, maxBufSize, maxBufCount), false);
+    RK_ENSURE(mpp_buffer_group_limit_config(buf_group_, maxBufSize, maxBufCount), false);
 
     int deinterlace = std::stoi(get_or("deinterlace", "0"));
     RK_WARN(mpi_->control(ctx_, MPP_DEC_SET_ENABLE_DEINTERLACE, &deinterlace));
     int afbc = std::stoi(get_or("afbc", "0"));
     if (afbc) {
-        // codec is h264, hevc, vp9, av1?
+        // codec is h264, hevc, vp9, av1? jpeg is not supported
         int afbc_fmt = MPP_FRAME_FBC_AFBC_V2; // for video output
-        RK_ENSURE(mpi_->control(ctx_, MPP_DEC_SET_OUTPUT_FORMAT, &afbc_fmt), false);
+        RK_WARN(mpi_->control(ctx_, MPP_DEC_SET_OUTPUT_FORMAT, &afbc_fmt));
     }
 
     // TODO: MPP_DEC_SET_IMMEDIATE_OUT? MPP_DEC_SET_VC1_EXTRA_DATA
     // MPP_DEC_SET_DISABLE_THREAD: decode in caller thread
     // MPP_DEC_GET_VPUMEM_USED_COUNT, MPP_DEC_SET_ENABLE_MVC
+    // MPP_DEC_SET_PARSER_FAST_MODE
 
     preprocess(par.extra);
 
@@ -325,6 +330,9 @@ bool MppDecoder::flush()
 
 int MppDecoder::decode(const Packet& pkt)
 {
+    if (codec_ == MPP_VIDEO_CodingMJPEG) {
+        return decodeJpeg(pkt);
+    }
     auto filtered = pkt.buffer;
     if (pkt.buffer && pkt.buffer->constData())
         filtered = preprocess(pkt);
@@ -375,6 +383,64 @@ int MppDecoder::decode(const Packet& pkt)
     return !pkt.isEnd() ? ret : INT_MAX;
 }
 
+int MppDecoder::decodeJpeg(const Packet& pkt)
+{
+    // 1 in 1 out
+    if (pkt.isEnd()) {
+        processOutput();
+        return INT_MAX;
+    }
+    MppBuffer mb = {};
+    // drm/dma is required
+    RK_ENSURE(mpp_buffer_get(buf_group_, &mb, pkt.buffer->size()), -1);
+    [[maybe_unused]] const auto _ = scope_atexit([&mb]() {
+        RK_WARN(mpp_buffer_put(mb));
+    });
+    RK_ENSURE(mpp_buffer_write(mb, 0, pkt.buffer->data(), pkt.buffer->size()), -2);
+    if (mpp_buffer_sync_partial_end_f) {
+        RK_WARN(mpp_buffer_sync_partial_end(mb, 0, pkt.buffer->size()));
+    }
+    MppPacket mp;
+    RK_ENSURE(mpp_packet_init_with_buffer(&mp, mb), -3);
+    mpp_packet_set_pts(mp, (RK_S64)(pkt.pts * FrameTimeScaleForInt));
+
+    [[maybe_unused]] const auto _ = scope_atexit([&mp]() {
+        if (mp)
+            RK_WARN(mpp_packet_deinit(&mp));
+    });
+    MppFrame mf = nullptr;
+    MppBuffer mfb = {};
+    RK_ENSURE(mpp_frame_init(&mf), -4);
+    [[maybe_unused]] const auto _mf = scope_atexit([&mf]() {
+        RK_WARN(mpp_frame_deinit(&mf));
+    });
+    const auto& par = parameters();
+    // 16 bytes aligned
+    const auto mfb_sz = ((par.width + 15) & ~15) * ((par.height + 15) & ~15) * 4;
+    RK_ENSURE(mpp_buffer_get(buf_group_, &mfb, mfb_sz), -5);
+    [[maybe_unused]] const auto _ = scope_atexit([&mfb]() {
+        RK_WARN(mpp_buffer_put(mfb));
+    });
+    mpp_frame_set_buffer(mf, mfb);
+    MppMeta meta = mpp_packet_get_meta(mp);
+    if (!meta || !mpp_packet_has_meta(mp)) {
+        clog << fmt::to_string("rockchip mpp packet no meta") << endl;
+        return -6;
+    }
+    RK_ENSURE(mpp_meta_set_frame(meta, KEY_OUTPUT_FRAME, mf), -7);
+    RK_ENSURE(mpi_->decode_put_packet(ctx_, mp), -8);
+    mp = {};
+    while (true) {
+        auto out = processOutput();
+        if (out < 0) {
+            return -1; // error
+        } else if (out == 0) {
+            break;
+        }
+    }
+    return 0;
+}
+
 int MppDecoder::processOutput()
 {
     MppFrame mf = nullptr;
@@ -390,6 +456,13 @@ int MppDecoder::processOutput()
         //clog << fmt::to_string("rockchip mpp decode get 0 frame. timeout = %d err: %d", err == MPP_ERR_TIMEOUT, err) << endl;
         return 0; // no output
     }
+    if (codec_ == MPP_VIDEO_CodingMJPEG) {
+        if (auto meta = mpp_frame_get_meta(mf)) {
+            MppPacket mp = {};
+            RK_WARN(mpp_meta_get_packet(meta, KEY_INPUT_PACKET, &mp));
+            mpp_packet_deinit(&mp); // deinit packet meta
+        }
+    }
     return processOutput(mf);
 }
 
@@ -404,7 +477,8 @@ int MppDecoder::processOutput(MppFrame mf)
         const auto h = mpp_frame_get_height(mf);
         clog << fmt::to_string("rockchip mpp frame info change to: %dx%d format: %d", w, h, mpp_frame_get_fmt(mf)) << endl;
         RK_WARN(mpi_->control(ctx_, MPP_DEC_SET_INFO_CHANGE_READY, nullptr));
-        return 0;
+        if (codec_ != MPP_VIDEO_CodingMJPEG)
+            return 0;
     }
     // if info change, setup decoder info. for mjpeg, get frame now, otherwise eagain
     if (mpp_frame_get_discard(mf)) {
@@ -412,6 +486,7 @@ int MppDecoder::processOutput(MppFrame mf)
         return 0;
     }
     if (auto err = mpp_frame_get_errinfo(mf)) { // TODO: drop frame but ignore error
+        // TODO: error property
         clog << fmt::to_string("rockchip mpp frame error: %d", err) << endl;
         return -3; // error
     }
