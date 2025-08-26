@@ -53,9 +53,9 @@ MDK_NS_BEGIN
 static MppCodingType codec_from(string_view name)
 {
     if (name == "h264" || name == "avc") {
-        return MPP_VIDEO_CodingAVC;
+        return MPP_VIDEO_CodingAVC; // 420p8, 420p10, 422p10, 422p8
     } else if (name == "h265" || name == "hevc") {
-        return MPP_VIDEO_CodingHEVC;
+        return MPP_VIDEO_CodingHEVC; // 420, 420p10
     } else if (name == "vp8") {
         return MPP_VIDEO_CodingVP8;
     } else if (name == "vp9") {
@@ -63,7 +63,7 @@ static MppCodingType codec_from(string_view name)
     } else if (name == "av1") {
         return MPP_VIDEO_CodingAV1;
     } else if (name.ends_with("jpeg")) {
-        return MPP_VIDEO_CodingMJPEG;
+        return MPP_VIDEO_CodingMJPEG; // 420, 422, 444
     } else if (name == "h263") {
         return MPP_VIDEO_CodingH263;
     } else if (name == "mpeg4") {
@@ -187,7 +187,7 @@ public:
     MppDecoder() {
         set(Options::ToAnnexB
             | Options::InsertCSD
-            | Options::BaseLayer | Options::Default);
+            | Options::BaseLayer | (Options::Default & ~Options::ParamtersChange));
         pool_ = NativeVideoBufferPool::create("DRM"); // optional
             mpp_set_log_level(MPP_LOG_DEBUG);
         /*if (mpp_set_log_callback) // env var mpp_debug and mpp_log_level are enough
@@ -509,14 +509,11 @@ int MppDecoder::processOutput(MppFrame mf)
     return 1; // output one frame
 }
 
-static void register_video_decoders_rockchip() {
-    VideoDecoder::registerOnce("rockchip", []{return new MppDecoder();});
-}
 MDK_NS_END
 
 // project name must be rockchip or mdk-rockchip
 MDK_PLUGIN(rockchip) {
     using namespace MDK_NS;
-    register_video_decoders_rockchip();
+    VideoDecoder::registerOnce("rockchip", []{return new MppDecoder();});
     return MDK_ABI_VERSION;
 }
