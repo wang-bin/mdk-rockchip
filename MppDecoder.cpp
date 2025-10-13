@@ -50,7 +50,7 @@ using namespace std;
 
 MDK_NS_BEGIN
 
-static MppCodingType codec_from(string_view name)
+static MppCodingType codec_from(string_view name, uint32_t tag)
 {
     if (name == "h264" || name == "avc") {
         return MPP_VIDEO_CodingAVC; // 420p8, 420p10, 422p10, 422p8
@@ -70,6 +70,12 @@ static MppCodingType codec_from(string_view name)
         return MPP_VIDEO_CodingMPEG4;
     } else if (name.starts_with("mpeg")) { // mpeg1/2
         return MPP_VIDEO_CodingMPEG2;
+    } else if (name == "cavs") {
+        if (tag == 0x0042)
+            return MPP_VIDEO_CodingAVSPLUS;
+        return MPP_VIDEO_CodingAVS;
+    } else if (name == "avs2") {
+        return MPP_VIDEO_CodingAVS2;
     }
     return MPP_VIDEO_CodingUnused;
 }
@@ -238,7 +244,7 @@ bool MppDecoder::open()
     clog << fmt::to_string("rockchip mpp api version: %u", mpi_->version) << endl;
 
     const auto& par = parameters();
-    const auto codec = codec_from(par.codec);
+    const auto codec = codec_from(par.codec, par.codec_tag);
     codec_ = codec;
     clog << fmt::to_string("rockchip mpp codec: %u", codec) << endl;
     RK_ENSURE(mpp_check_support_format(MPP_CTX_DEC, codec), false);
