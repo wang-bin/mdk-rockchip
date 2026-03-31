@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 WangBin <wbsecg1 at gmail.com>
+ * Copyright (c) 2025-2026 WangBin <wbsecg1 at gmail.com>
  * This file is part of MDK
  * MDK SDK: https://github.com/wang-bin/mdk-sdk
  * Free for opensource softwares or non-commercial use.
@@ -193,7 +193,7 @@ public:
     MppDecoder() {
         set(Options::ToAnnexB
             | Options::InsertCSD
-            | Options::BaseLayer | (Options::Default & ~Options::ParamtersChange));
+            | Options::BaseLayer | (Options::Default & ~Options::ParametersChange));
         pool_ = NativeVideoBufferPool::create("DRM"); // optional
             mpp_set_log_level(MPP_LOG_DEBUG);
         /*if (mpp_set_log_callback) // env var mpp_debug and mpp_log_level are enough
