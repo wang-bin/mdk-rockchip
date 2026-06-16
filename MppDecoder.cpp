@@ -340,8 +340,11 @@ int MppDecoder::decode(const Packet& pkt)
         return decodeJpeg(pkt);
     }
     auto filtered = pkt.buffer;
-    if (pkt.buffer && pkt.buffer->constData())
+    if (pkt.buffer && pkt.buffer->constData()) {
         filtered = preprocess(pkt);
+        if (!filtered) // drop
+            return 0;
+    }
     MppPacket mp;
     if (pkt.isEnd() || !filtered) {
         clog << "mpp packet EOS" << endl;
