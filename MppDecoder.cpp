@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2025-2026 WangBin <wbsecg1 at gmail.com>
+ * AI participated
  * This file is part of MDK
  * MDK SDK: https://github.com/wang-bin/mdk-sdk
  * Free for opensource softwares or non-commercial use.
@@ -347,6 +348,7 @@ int MppDecoder::decode(const Packet& pkt)
     }
     MppPacket mp;
     if (pkt.isEnd() || !filtered) {
+        preprocess(pkt);
         clog << "mpp packet EOS" << endl;
         RK_ENSURE(mpp_packet_init(&mp, nullptr, 0), {});
         mpp_packet_set_eos(mp);
