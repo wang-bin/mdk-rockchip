@@ -382,14 +382,15 @@ int MppDecoder::decode(const Packet& pkt)
     }
 
 #if 1
-    while (true) {
+// Ordinary input yields after one output so a subsequent blocking query cannot delay taking the frame.
+    do {
         auto out = processOutput();
         if (out < 0) {
             return -1; // error
         } else if (out == 0) {
             break;
         }
-    }
+    } while (pkt.isEnd());
 #endif
     return !pkt.isEnd() ? ret : INT_MAX;
 }
@@ -441,14 +442,8 @@ int MppDecoder::decodeJpeg(const Packet& pkt)
     RK_ENSURE(mpp_meta_set_frame(meta, KEY_OUTPUT_FRAME, mf), -7);
     RK_ENSURE(mpi_->decode_put_packet(ctx_, mp), -8);
     mp = {};
-    while (true) {
-        auto out = processOutput();
-        if (out < 0) {
-            return -1; // error
-        } else if (out == 0) {
-            break;
-        }
-    }
+    if (processOutput() < 0)
+        return -1;
     return 0;
 }
 
