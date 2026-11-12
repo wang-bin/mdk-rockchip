@@ -342,7 +342,7 @@ int MppDecoder::decode(const Packet& pkt)
     }
     auto filtered = pkt.buffer;
     if (pkt.buffer && pkt.buffer->constData()) {
-        filtered = preprocess(pkt);
+        filtered = preprocess(pkt).buffer;
         if (!filtered) // drop
             return 0;
     }
