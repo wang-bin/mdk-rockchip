@@ -340,21 +340,14 @@ int MppDecoder::decode(const Packet& pkt)
     if (codec_ == MPP_VIDEO_CodingMJPEG) {
         return decodeJpeg(pkt);
     }
-    auto filtered = pkt.buffer;
-    if (pkt.buffer && pkt.buffer->constData()) {
-        filtered = preprocess(pkt).buffer;
-        if (!filtered) // drop
-            return 0;
-    }
     MppPacket mp;
-    if (pkt.isEnd() || !filtered) {
-        preprocess(pkt);
+    if (pkt.isEnd() || !pkt.buffer) {
         clog << "mpp packet EOS" << endl;
         RK_ENSURE(mpp_packet_init(&mp, nullptr, 0), {});
         mpp_packet_set_eos(mp);
     } else {
         // print filtered first 8 bytes
-        RK_ENSURE(mpp_packet_init(&mp, filtered->data(), filtered->size()), {});
+        RK_ENSURE(mpp_packet_init(&mp, pkt.buffer->data(), pkt.buffer->size()), {});
         mpp_packet_set_pts(mp, (RK_S64)(pkt.pts * FrameTimeScaleForInt));
         //mpp_packet_set_dts(mp, (RK_S64)(pkt.dts * FrameTimeScaleForInt));
     }
